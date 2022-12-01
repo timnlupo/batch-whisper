@@ -71,9 +71,11 @@ def detect_language(model: "Whisper", mel: Tensor, tokenizer: Tokenizer = None) 
 @dataclass(frozen=True)
 class DecodingOptions:
     task: str = "transcribe"  # whether to perform X->X "transcribe" or X->English "translate"
+    # TODO: Language could vary between samples of a batch
     language: Optional[str] = None  # language that the audio is in; uses detected language if None
 
     # sampling-related options
+    # NOTE: These can be held constant across a batch
     temperature: float = 0.0
     sample_len: Optional[int] = None  # maximum number of tokens to sample
     best_of: Optional[int] = None     # number of independent samples to collect, when t > 0
@@ -83,6 +85,7 @@ class DecodingOptions:
     # options for ranking generations (either beams or best-of-N samples)
     length_penalty: Optional[float] = None   # "alpha" in Google NMT, None defaults to length norm
 
+    # TODO: These cannot be kept constant across a batch
     # prompt, prefix, and token suppression
     prompt: Optional[Union[str, List[int]]] = None   # text or tokens for the previous context
     prefix: Optional[Union[str, List[int]]] = None   # text or tokens to prefix the current context
@@ -448,6 +451,7 @@ class DecodingTask:
     logit_filters: List[LogitFilter]
 
     def __init__(self, model: "Whisper", options: DecodingOptions):
+        # NOTE: This is the main decoding loop
         self.model = model
 
         language = options.language or "en"
@@ -589,6 +593,7 @@ class DecodingTask:
 
         try:
             for i in range(self.sample_len):
+                # NOTE: **********Here is the model inference****************
                 logits = self.inference.logits(tokens, audio_features)
 
                 if i == 0 and self.tokenizer.no_speech is not None:  # save no_speech_probs
@@ -634,6 +639,7 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
+        # NOTE: This is where the model is called
         tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens)
 
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
