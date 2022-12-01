@@ -514,6 +514,30 @@ class DecodingTask:
         return options
 
     def _get_initial_tokens(self) -> Tuple[int]:
+        # TODO: branch to _get_batched_initial_tokens if necessary
+        tokens = list(self.sot_sequence)
+        prefix = self.options.prefix
+        prompt = self.options.prompt
+
+        if prefix:
+            prefix_tokens = (
+                self.tokenizer.encode(" " + prefix.strip()) if isinstance(prefix, str) else prefix
+            )
+            if self.sample_len is not None:
+                max_prefix_len = self.n_ctx // 2 - self.sample_len
+                prefix_tokens = prefix_tokens[-max_prefix_len:]
+            tokens = tokens + prefix_tokens
+
+        if prompt:
+            prompt_tokens = (
+                self.tokenizer.encode(" " + prompt.strip()) if isinstance(prompt, str) else prompt
+            )
+            tokens = [self.tokenizer.sot_prev] + prompt_tokens[-(self.n_ctx // 2 - 1) :] + tokens
+
+        return tuple(tokens)
+
+    def _get_batched_initial_tokens(self) -> Tuple[int]:
+        # TODO: Enable batch processing of token histories
         tokens = list(self.sot_sequence)
         prefix = self.options.prefix
         prompt = self.options.prompt
@@ -624,6 +648,7 @@ class DecodingTask:
         n_audio: int = mel.shape[0]
 
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
+        # TODO: get prompt tokens in self.initial_tokens, pad, and batch along zero dimension
         tokens: Tensor = torch.tensor([self.initial_tokens]).repeat(n_audio, 1)
 
         # detect language if requested, overwriting the language token
