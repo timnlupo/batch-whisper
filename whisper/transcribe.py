@@ -395,21 +395,21 @@ def batch_transcribe(
                     if compression_ratio_threshold is not None and dr.compression_ratio > compression_ratio_threshold:
                         needs_fallback = True  # too repetitive
                         # NOTE: If the compression ratio is too high, then the sequence is repetitive and will retry with higher temperature
-                        print("Falling back due to compression ratio.")
+                        tqdm.tqdm.write("Falling back due to compression ratio.")
                     if logprob_threshold is not None and dr.avg_logprob < logprob_threshold:
                         needs_fallback = True  # average log probability is too low
                         # NOTE: If the log probability of the sequence is too low, then retry with higher temperature
-                        print("Falling back due to low log probability.")
+                        tqdm.tqdm.write("Falling back due to low log probability.")
             else:
                 # NOTE: run tests for the single output if not batched
                 if compression_ratio_threshold is not None and decode_result.compression_ratio > compression_ratio_threshold:
                     needs_fallback = True  # too repetitive
                     # NOTE: If the compression ratio is too high, then the sequence is repetitive and will retry with higher temperature
-                    print("Falling back due to compression ratio.")
+                    tqdm.tqdm.write("Falling back due to compression ratio.")
                 if logprob_threshold is not None and decode_result.avg_logprob < logprob_threshold:
                     needs_fallback = True  # average log probability is too low
                     # NOTE: If the log probability of the sequence is too low, then retry with higher temperature
-                    print("Falling back due to low log probability.")
+                    tqdm.tqdm.write("Falling back due to low log probability.")
 
             if not needs_fallback:
                 break
@@ -469,25 +469,32 @@ def batch_transcribe(
         """Return False when all seekers have exhausted the length of their audio clips."""
         return any([seeker < nf for seeker, nf in list(zip(seekers, num_frames))])
 
-    with tqdm.tqdm(total=max(num_frames), unit='frames', disable=not verbose) as pbar:
+    with tqdm.tqdm(total=max(num_frames), unit='frames', disable=verbose is not False) as pbar:
         # NOTE: This is the meat of the decoding loop
         # NOTE: num_frames = columns of global mel spec
+        count = 0
+        rescounter = 0
         while check_cursors(seekers, num_frames):
+            count += 1
+            if count >= 10:
+                break
+            tqdm.tqdm.write(f'seekers: {seekers}')
+            tqdm.tqdm.write(f'num_frames: {num_frames}')
             # NOTE: This tells us if some of the audio clips have finished being processed
             continue_processing = [seeker < nf for seeker,nf in list(zip(seekers, num_frames))]
             # Only those segments for clips that are not done being processed
+            imap = [i for i,v in enumerate(continue_processing) if v]
             batch_segments = []
             batch_segment_durations = []
             batch_timestamp_offsets = []
             for i,mel in enumerate(mels):
                 if continue_processing[i]:
-                    seeker = seekers[i]
                     # NOTE: Only select the segments that remain past the current timecode from the batch
                     # NOTE: segment is a selection from the overall mel spec of the clip
-                    timestamp_offset = float(seeker * HOP_LENGTH / SAMPLE_RATE)
+                    timestamp_offset = float(seekers[i] * HOP_LENGTH / SAMPLE_RATE)
                     batch_timestamp_offsets.append(timestamp_offset)
                     # NOTE: N_FRAMES is 3000, the width of the mel-spec that the encoder expects
-                    segment = pad_or_trim(mel[:, seeker:], N_FRAMES).to(model.device).to(dtype)
+                    segment = pad_or_trim(mel[:, seekers[i]:], N_FRAMES).to(model.device).to(dtype)
                     segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
                     batch_segments.append(segment)
                     batch_segment_durations.append(segment_duration)
@@ -496,8 +503,9 @@ def batch_transcribe(
 
             # TODO: Handle decode options for each clip individually
             # TODO: This i is out of context
-            decode_options["prompt"] = all_tokens[i][prompt_reset_since[i]:]
+            decode_options["prompt"] = [all_tokens[imap[i]][prompt_reset_since[imap[i]]:] for i in range(len(batch_segments))]
             results: List[DecodingResult] = decode_with_fallback(torch.stack(batch_segments)) 
+            rescounter += 1
             batch_tokens = [torch.tensor(result.tokens) for result in results]
 
             no_speech_results = [False]*len(results)
@@ -505,72 +513,73 @@ def batch_transcribe(
                 for i,result in enumerate(results):
                     # NOTE: Step through returned batch results and check for no speech
                     # no voice activity check
-                    should_skip = result.no_speech_prob > no_speech_threshold
+                    should_skip = result.no_speech_prob[i] > no_speech_threshold
                     if logprob_threshold is not None and result.avg_logprob > logprob_threshold:
                         # don't skip if the logprob is high enough, despite the no_speech_prob
                         should_skip = False
 
                     if should_skip:
-                        seekers[i] += segment.shape[-1]  # fast-forward to the next segment boundary
+                        seekers[imap[i]] += segment.shape[-1]  # fast-forward to the next segment boundary
                         no_speech_results[i] = True
 
             # TODO: Investigate tokenizer.timestamp_begin
-            batch_timestamp_tokens: List[torch.Tensor] = [tokens.ge(tokenizers[languages[i]].timestamp_begin) for i,tokens in enumerate(batch_tokens)]
+            batch_timestamp_tokens: List[torch.Tensor] = [tokens.ge(tokenizers[languages[imap[i]]].timestamp_begin) for i,tokens in enumerate(batch_tokens)]
             batch_consecutive = [torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0].add_(1) for timestamp_tokens in batch_timestamp_tokens]
-            bindex = -1
+            #print(f'batch_consecutive: {batch_consecutive}')
             for i,consecutive in enumerate(batch_consecutive):
                 if no_speech_results[i]:
                     continue
-                else:
-                    bindex += 1
                 if len(consecutive) > 0:  # if the output contains two consecutive timestamp tokens
                     last_slice = 0
                     for current_slice in consecutive:
-                        sliced_tokens = batch_tokens[bindex][last_slice:current_slice]
+                        sliced_tokens = batch_tokens[i][last_slice:current_slice]
                         start_timestamp_position = (
-                            sliced_tokens[0].item() - tokenizers[languages[i]].timestamp_begin
+                            sliced_tokens[0].item() - tokenizers[languages[imap[i]]].timestamp_begin
                         )
                         end_timestamp_position = (
-                            sliced_tokens[-1].item() - tokenizers[languages[i]].timestamp_begin
+                            sliced_tokens[-1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                         )
                         # NOTE: This is where we append results and metadata to our list of results
+                        #print(f'res: {rescounter}, i: {i}, consecutive results: {results[i]}')
+                        #print(f'sliced tokens: {sliced_tokens}')
                         add_segment(
-                            seeker=seekers[i],
-                            segments=all_segments[i],
+                            seeker=seekers[imap[i]],
+                            segments=all_segments[imap[i]],
                             start=timestamp_offset + start_timestamp_position * time_precision,
                                 end=timestamp_offset + end_timestamp_position * time_precision,
                                 text_tokens=sliced_tokens[1:-1],
                                 result=results[i],
-                                tokenizer=tokenizers[languages[i]]
+                                tokenizer=tokenizers[languages[imap[i]]]
                             )
                         last_slice = current_slice
-                        last_timestamp_position = (
-                            batch_tokens[bindex][last_slice - 1].item() - tokenizers[languages[i]].timestamp_begin
-                        )
-                        seekers[i] += last_timestamp_position * input_stride
-                        all_tokens[i].extend(batch_tokens[bindex][: last_slice + 1].tolist())
+                    last_timestamp_position = (
+                        batch_tokens[i][last_slice - 1].item() - tokenizers[languages[imap[i]]].timestamp_begin
+                    )
+                    seekers[imap[i]] += last_timestamp_position * input_stride
+                    all_tokens[imap[i]].extend(batch_tokens[i][: last_slice + 1].tolist())
                 else:
                     duration = batch_segment_durations[i]
-                    timestamps = batch_tokens[bindex][batch_timestamp_tokens[bindex].nonzero().flatten()]
-                    if len(timestamps) > 0 and timestamps[-1].item() != tokenizers[languages[i]].timestamp_begin:
+                    timestamps = batch_tokens[i][batch_timestamp_tokens[i].nonzero().flatten()]
+                    if len(timestamps) > 0 and timestamps[-1].item() != tokenizers[languages[imap[i]]].timestamp_begin:
                         # no consecutive timestamps but it has a timestamp; use the last one.
                         # single timestamp at the end means no speech after the last timestamp.
-                        last_timestamp_position = timestamps[-1].item() - tokenizers[languages[i]].timestamp_begin
+                        last_timestamp_position = timestamps[-1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                         duration = last_timestamp_position * time_precision
 
                     # NOTE: This is where we append results and metadata to our list of results
+                    #print(f'res: {rescounter}, i: {i}, non_consecutive results: {results[i]}')
                     add_segment(
-                        seeker=seekers[i],
-                        segments=all_segments[i],
+                        seeker=seekers[imap[i]],
+                        segments=all_segments[imap[i]],
                         start=timestamp_offset,
                         end=timestamp_offset + duration,
-                        text_tokens=batch_tokens[bindex],
+                        text_tokens=batch_tokens[i],
                         result=results[i],
-                        tokenizer=tokenizers[languages[i]]
+                        tokenizer=tokenizers[languages[imap[i]]]
                     )
 
-                    seekers[i] += segments[i].shape[-1]
-                    all_tokens[i].extend(batch_tokens[bindex].tolist())
+                    seekers[imap[i]] += segments[imap[i]].shape[-1]
+                    all_tokens[imap[i]].extend(batch_tokens[i].tolist())
 
                 if not condition_on_previous_text or result.temperature > 0.5:
                     # do not feed the prompt tokens if a high temperature was used
