@@ -469,7 +469,6 @@ class DecodingTask:
 
         #self.initial_tokens: Tuple[int] = self._get_initial_tokens()
         self.initial_tokens = self._get_initial_tokens()
-        self.batch_logit_filters = []
         self.logit_filters = []
         if type(self.initial_tokens) == list:
             # branch to handle batched case
@@ -492,20 +491,18 @@ class DecodingTask:
 
             # logit filters: applies various rules to suppress or penalize certain tokens
             for i in range(len(self.initial_tokens)):
-                rules = []
                 if self.options.suppress_blank:
-                    rules.append(SuppressBlank(self.tokenizer, self.sample_begin[i]))
+                    self.logit_filters.append(SuppressBlank(self.tokenizer, self.sample_begin[i]))
                 if self.options.suppress_tokens:
-                    rules.append(SuppressTokens(self._get_suppress_tokens()))
+                    self.logit_filters.append(SuppressTokens(self._get_suppress_tokens()))
                 if not options.without_timestamps:
                     precision = CHUNK_LENGTH / model.dims.n_audio_ctx  # usually 0.02 seconds
                     max_initial_timestamp_index = None
                     if options.max_initial_timestamp:
                         max_initial_timestamp_index = round(self.options.max_initial_timestamp / precision)
-                    rules.append(
+                    self.logit_filters.append(
                         ApplyTimestampRules(tokenizer, self.sample_begin[i], max_initial_timestamp_index)
                     )
-                self.batch_logit_filters.append(rules)
         else:
             self.sample_begin: int = len(self.initial_tokens)
             self.sot_index: int = self.initial_tokens.index(tokenizer.sot)
@@ -686,10 +683,6 @@ class DecodingTask:
                 if len(self.logit_filters) > 0:
                     for logit_filter in self.logit_filters:
                         logit_filter.apply(logits, tokens)
-                else:
-                    for logit_filters in self.batch_logit_filters:
-                        for logit_filter in logit_filters:
-                            logit_filter.apply(logits, tokens)
 
                 # expand the tokens tensor with the selected next tokens
                 tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
