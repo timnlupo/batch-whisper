@@ -519,15 +519,21 @@ def batch_transcribe(
                         should_skip = False
 
                     if should_skip:
+                        tqdm.tqdm.write(f'no speech skipping {i}')
+                        tqdm.tqdm.write(f'skipping seeker forward due to no speech should skip, prev {seekers[imap[i]]}')
                         seekers[imap[i]] += segment.shape[-1]  # fast-forward to the next segment boundary
                         no_speech_results[i] = True
+                        tqdm.tqdm.write(f'... now seekers: {seekers[imap[i]]}')
 
             # TODO: Investigate tokenizer.timestamp_begin
+            tqdm.tqdm.write(f'batch_tokens: {batch_tokens}')
             batch_timestamp_tokens: List[torch.Tensor] = [tokens.ge(tokenizers[languages[imap[i]]].timestamp_begin) for i,tokens in enumerate(batch_tokens)]
+            tqdm.tqdm.write(f'batch_timestamp_tokens: {batch_timestamp_tokens}')
             batch_consecutive = [torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0].add_(1) for timestamp_tokens in batch_timestamp_tokens]
-            #print(f'batch_consecutive: {batch_consecutive}')
+            tqdm.tqdm.write(f'batch_consecutive: {batch_consecutive}')
             for i,consecutive in enumerate(batch_consecutive):
                 if no_speech_results[i]:
+                    tqdm.tqdm.write(f'skipping, no speech results {i}')
                     continue
                 if len(consecutive) > 0:  # if the output contains two consecutive timestamp tokens
                     last_slice = 0
@@ -540,8 +546,8 @@ def batch_transcribe(
                             sliced_tokens[-1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                         )
                         # NOTE: This is where we append results and metadata to our list of results
-                        #print(f'res: {rescounter}, i: {i}, consecutive results: {results[i]}')
-                        #print(f'sliced tokens: {sliced_tokens}')
+                        #tqdm.tqdm.write(f'res: {rescounter}, i: {i}, consecutive results: {results[i]}')
+                        #tqdm.tqdm.write(f'sliced tokens: {sliced_tokens}')
                         add_segment(
                             seeker=seekers[imap[i]],
                             segments=all_segments[imap[i]],
@@ -555,8 +561,10 @@ def batch_transcribe(
                     last_timestamp_position = (
                         batch_tokens[i][last_slice - 1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                     )
+                    tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
                     seekers[imap[i]] += last_timestamp_position * input_stride
                     all_tokens[imap[i]].extend(batch_tokens[i][: last_slice + 1].tolist())
+                    tqdm.tqdm.write(f'... to {seekers[imap[i]]} by timestamp_pos {last_timestamp_position} * input_stride {input_stride} = {last_timestamp_position * input_stride}')
                 else:
                     duration = batch_segment_durations[i]
                     timestamps = batch_tokens[i][batch_timestamp_tokens[i].nonzero().flatten()]
@@ -578,8 +586,10 @@ def batch_transcribe(
                         tokenizer=tokenizers[languages[imap[i]]]
                     )
 
+                    tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
                     seekers[imap[i]] += segments[imap[i]].shape[-1]
                     all_tokens[imap[i]].extend(batch_tokens[i].tolist())
+                    tqdm.tqdm.write(f'... to {seekers[imap[i]]} by segment shape {segments[imap[i]].shape[-1]}')
 
                 if not condition_on_previous_text or result.temperature > 0.5:
                     # do not feed the prompt tokens if a high temperature was used
@@ -590,7 +600,7 @@ def batch_transcribe(
             pbar.update(min(num_frames[midx], seekers[midx]) - previous_seek_values[midx])
             previous_seek_values = copy.deepcopy(seekers)
 
-    return [dict(text=tokenizers[languages[i]].decode(all_tokens[i][len(initial_prompt):]), segments=all_segments[i], language=languages[i]) for i in range(len(all_segments))]
+    return [dict(text=tokenizers[languages[i]].decode([token for token in all_tokens[i][len(initial_prompt):] if token < tokenizers[languages[i]].eot]), segments=all_segments[i], language=languages[i]) for i in range(len(all_segments))]
 
 
 def cli():

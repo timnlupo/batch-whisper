@@ -578,11 +578,13 @@ class DecodingTask:
         tokens = list(self.sot_sequence)
         prefixes = self.options.prefix
         if type(prefixes) != list:
-            prefixes = [prefixes]
+            prefixes = [prefixes]*len(self.options.prompt)
         prompts = self.options.prompt
 
         res_tokens = [tokens]*len(prompts)
+        #print(f'initial res_tokens: {res_tokens}')
         for i,(prefix,prompt) in enumerate(list(zip(prefixes, prompts))):
+            #print(f'i: {i}, prefix: {prefix}, prompt: {prompt}')
             if prefix:
                 prefix_tokens = (
                     self.tokenizer.encode(" " + prefix.strip()) if isinstance(prefix, str) else prefix
@@ -597,7 +599,7 @@ class DecodingTask:
                     self.tokenizer.encode(" " + prompt.strip()) if isinstance(prompt, str) else prompt
                 )
                 res_tokens[i] = [self.tokenizer.sot_prev] + prompt_tokens[-(self.n_ctx // 2 - 1) :] + res_tokens[i]
-        
+        #print(f'final res_tokens: {res_tokens}') 
         return [tuple(tokens) for tokens in res_tokens]
 
     def _get_suppress_tokens(self) -> Tuple[int]:
@@ -702,17 +704,20 @@ class DecodingTask:
 
         def pad_tokens(batch_tokens: List[List[int]]) -> List[List[int]]:
             # pad all token sequences to the length of the largest sequence with nospeech tokens
+            print(f'batch tokens to pad: {batch_tokens}')
             target_len = max([len(l) for l in batch_tokens])
             new_batch_tokens = []
             for entry in batch_tokens:
                 disparity = target_len - len(entry)
                 prefix = [50256]*disparity
                 new_batch_tokens.append(prefix + entry)
+            print(f'new batched tokens after padding: {new_batch_tokens}')
             return new_batch_tokens
 
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
         # TODO: get prompt tokens in self.initial_tokens, pad, and batch along zero dimension
         if type(self.initial_tokens) == list:
+            print(f'initial_tokens: {self.initial_tokens}')
             tokens = [list(token) for token in self.initial_tokens]
             tokens = pad_tokens(tokens)
             tokens: Tensor = torch.tensor(tokens)
