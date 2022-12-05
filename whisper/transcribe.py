@@ -395,21 +395,21 @@ def batch_transcribe(
                     if compression_ratio_threshold is not None and dr.compression_ratio > compression_ratio_threshold:
                         needs_fallback = True  # too repetitive
                         # NOTE: If the compression ratio is too high, then the sequence is repetitive and will retry with higher temperature
-                        tqdm.tqdm.write("Falling back due to compression ratio.")
+                        #tqdm.tqdm.write("Falling back due to compression ratio.")
                     if logprob_threshold is not None and dr.avg_logprob < logprob_threshold:
                         needs_fallback = True  # average log probability is too low
                         # NOTE: If the log probability of the sequence is too low, then retry with higher temperature
-                        tqdm.tqdm.write("Falling back due to low log probability.")
+                        #tqdm.tqdm.write("Falling back due to low log probability.")
             else:
                 # NOTE: run tests for the single output if not batched
                 if compression_ratio_threshold is not None and decode_result.compression_ratio > compression_ratio_threshold:
                     needs_fallback = True  # too repetitive
                     # NOTE: If the compression ratio is too high, then the sequence is repetitive and will retry with higher temperature
-                    tqdm.tqdm.write("Falling back due to compression ratio.")
+                    #tqdm.tqdm.write("Falling back due to compression ratio.")
                 if logprob_threshold is not None and decode_result.avg_logprob < logprob_threshold:
                     needs_fallback = True  # average log probability is too low
                     # NOTE: If the log probability of the sequence is too low, then retry with higher temperature
-                    tqdm.tqdm.write("Falling back due to low log probability.")
+                    #tqdm.tqdm.write("Falling back due to low log probability.")
 
             if not needs_fallback:
                 break
@@ -472,14 +472,14 @@ def batch_transcribe(
     with tqdm.tqdm(total=max(num_frames), unit='frames', disable=verbose is not False) as pbar:
         # NOTE: This is the meat of the decoding loop
         # NOTE: num_frames = columns of global mel spec
-        count = 0
-        rescounter = 0
+        #count = 0
+        #rescounter = 0
         while check_cursors(seekers, num_frames):
-            count += 1
-            if count >= 10:
-                break
-            tqdm.tqdm.write(f'seekers: {seekers}')
-            tqdm.tqdm.write(f'num_frames: {num_frames}')
+            #count += 1
+            #if count >= 10:
+            #    break
+            #tqdm.tqdm.write(f'seekers: {seekers}')
+            #tqdm.tqdm.write(f'num_frames: {num_frames}')
             # NOTE: This tells us if some of the audio clips have finished being processed
             continue_processing = [seeker < nf for seeker,nf in list(zip(seekers, num_frames))]
             # Only those segments for clips that are not done being processed
@@ -505,7 +505,7 @@ def batch_transcribe(
             # TODO: This i is out of context
             decode_options["prompt"] = [all_tokens[imap[i]][prompt_reset_since[imap[i]]:] for i in range(len(batch_segments))]
             results: List[DecodingResult] = decode_with_fallback(torch.stack(batch_segments)) 
-            rescounter += 1
+            #rescounter += 1
             batch_tokens = [torch.tensor(result.tokens) for result in results]
 
             no_speech_results = [False]*len(results)
@@ -519,21 +519,21 @@ def batch_transcribe(
                         should_skip = False
 
                     if should_skip:
-                        tqdm.tqdm.write(f'no speech skipping {i}')
-                        tqdm.tqdm.write(f'skipping seeker forward due to no speech should skip, prev {seekers[imap[i]]}')
+                        #tqdm.tqdm.write(f'no speech skipping {i}')
+                        #tqdm.tqdm.write(f'skipping seeker forward due to no speech should skip, prev {seekers[imap[i]]}')
                         seekers[imap[i]] += segment.shape[-1]  # fast-forward to the next segment boundary
                         no_speech_results[i] = True
-                        tqdm.tqdm.write(f'... now seekers: {seekers[imap[i]]}')
+                        #tqdm.tqdm.write(f'... now seekers: {seekers[imap[i]]}')
 
             # TODO: Investigate tokenizer.timestamp_begin
-            tqdm.tqdm.write(f'batch_tokens: {batch_tokens}')
+            #tqdm.tqdm.write(f'batch_tokens: {batch_tokens}')
             batch_timestamp_tokens: List[torch.Tensor] = [tokens.ge(tokenizers[languages[imap[i]]].timestamp_begin) for i,tokens in enumerate(batch_tokens)]
-            tqdm.tqdm.write(f'batch_timestamp_tokens: {batch_timestamp_tokens}')
+            #tqdm.tqdm.write(f'batch_timestamp_tokens: {batch_timestamp_tokens}')
             batch_consecutive = [torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0].add_(1) for timestamp_tokens in batch_timestamp_tokens]
-            tqdm.tqdm.write(f'batch_consecutive: {batch_consecutive}')
+            #tqdm.tqdm.write(f'batch_consecutive: {batch_consecutive}')
             for i,consecutive in enumerate(batch_consecutive):
                 if no_speech_results[i]:
-                    tqdm.tqdm.write(f'skipping, no speech results {i}')
+                    #tqdm.tqdm.write(f'skipping, no speech results {i}')
                     continue
                 if len(consecutive) > 0:  # if the output contains two consecutive timestamp tokens
                     last_slice = 0
@@ -546,8 +546,8 @@ def batch_transcribe(
                             sliced_tokens[-1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                         )
                         # NOTE: This is where we append results and metadata to our list of results
-                        #tqdm.tqdm.write(f'res: {rescounter}, i: {i}, consecutive results: {results[i]}')
-                        #tqdm.tqdm.write(f'sliced tokens: {sliced_tokens}')
+                        ##tqdm.tqdm.write(f'res: {rescounter}, i: {i}, consecutive results: {results[i]}')
+                        ##tqdm.tqdm.write(f'sliced tokens: {sliced_tokens}')
                         add_segment(
                             seeker=seekers[imap[i]],
                             segments=all_segments[imap[i]],
@@ -561,10 +561,10 @@ def batch_transcribe(
                     last_timestamp_position = (
                         batch_tokens[i][last_slice - 1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                     )
-                    tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
+                    #tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
                     seekers[imap[i]] += last_timestamp_position * input_stride
                     all_tokens[imap[i]].extend(batch_tokens[i][: last_slice + 1].tolist())
-                    tqdm.tqdm.write(f'... to {seekers[imap[i]]} by timestamp_pos {last_timestamp_position} * input_stride {input_stride} = {last_timestamp_position * input_stride}')
+                    #tqdm.tqdm.write(f'... to {seekers[imap[i]]} by timestamp_pos {last_timestamp_position} * input_stride {input_stride} = {last_timestamp_position * input_stride}')
                 else:
                     duration = batch_segment_durations[i]
                     timestamps = batch_tokens[i][batch_timestamp_tokens[i].nonzero().flatten()]
@@ -586,10 +586,10 @@ def batch_transcribe(
                         tokenizer=tokenizers[languages[imap[i]]]
                     )
 
-                    tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
+                    #tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
                     seekers[imap[i]] += segments[imap[i]].shape[-1]
                     all_tokens[imap[i]].extend(batch_tokens[i].tolist())
-                    tqdm.tqdm.write(f'... to {seekers[imap[i]]} by segment shape {segments[imap[i]].shape[-1]}')
+                    #tqdm.tqdm.write(f'... to {seekers[imap[i]]} by segment shape {segments[imap[i]].shape[-1]}'
 
                 if not condition_on_previous_text or result.temperature > 0.5:
                     # do not feed the prompt tokens if a high temperature was used

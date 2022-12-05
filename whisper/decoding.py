@@ -704,20 +704,20 @@ class DecodingTask:
 
         def pad_tokens(batch_tokens: List[List[int]]) -> List[List[int]]:
             # pad all token sequences to the length of the largest sequence with nospeech tokens
-            print(f'batch tokens to pad: {batch_tokens}')
+            #print(f'batch tokens to pad: {batch_tokens}')
             target_len = max([len(l) for l in batch_tokens])
             new_batch_tokens = []
             for entry in batch_tokens:
                 disparity = target_len - len(entry)
                 prefix = [50256]*disparity
                 new_batch_tokens.append(prefix + entry)
-            print(f'new batched tokens after padding: {new_batch_tokens}')
+            #print(f'new batched tokens after padding: {new_batch_tokens}')
             return new_batch_tokens
 
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
         # TODO: get prompt tokens in self.initial_tokens, pad, and batch along zero dimension
         if type(self.initial_tokens) == list:
-            print(f'initial_tokens: {self.initial_tokens}')
+            #print(f'initial_tokens: {self.initial_tokens}')
             tokens = [list(token) for token in self.initial_tokens]
             tokens = pad_tokens(tokens)
             tokens: Tensor = torch.tensor(tokens)
