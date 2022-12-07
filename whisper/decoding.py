@@ -580,6 +580,7 @@ class DecodingTask:
         if type(prefixes) != list:
             prefixes = [prefixes]*len(self.options.prompt)
         prompts = self.options.prompt
+        min_prompt_len = min([len(prompt) for prompt in prompts])
 
         res_tokens = [tokens]*len(prompts)
         #print(f'initial res_tokens: {res_tokens}')
@@ -598,6 +599,7 @@ class DecodingTask:
                 prompt_tokens = (
                     self.tokenizer.encode(" " + prompt.strip()) if isinstance(prompt, str) else prompt
                 )
+                prompt_tokens = prompt_tokens[-min_prompt_len:]
                 res_tokens[i] = [self.tokenizer.sot_prev] + prompt_tokens[-(self.n_ctx // 2 - 1) :] + res_tokens[i]
         #print(f'final res_tokens: {res_tokens}') 
         return [tuple(tokens) for tokens in res_tokens]
@@ -711,15 +713,29 @@ class DecodingTask:
                 disparity = target_len - len(entry)
                 prefix = [50256]*disparity
                 new_batch_tokens.append(prefix + entry)
-            #print(f'new batched tokens after padding: {new_batch_tokens}')
+            print(f'new batched tokens after padding: {new_batch_tokens}')
+            print(f'decoded final tokens: {[tokenizer.decode(tokens) for tokens in new_batch_tokens]}')
+            return new_batch_tokens
+        
+        def trunc_tokens(batch_tokens: List[List[int]]) -> List[List[int]]:
+            # truncate all token sequences to the length of the shortest sequence
+            target_len = min([len(l) for l in batch_tokens])
+            new_batch_tokens = []
+            for entry in batch_tokens:
+                pref = entry.pop(0)
+                disparity = len(entry) - target_len + 1
+                new_batch_tokens.append([pref] + entry[disparity:])
             return new_batch_tokens
 
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
         # TODO: get prompt tokens in self.initial_tokens, pad, and batch along zero dimension
         if type(self.initial_tokens) == list:
-            #print(f'initial_tokens: {self.initial_tokens}')
+            print(f'initial_tokens: {self.initial_tokens}')
+            print(f'decoded initial tokens: {[tokenizer.decode(tokens) for tokens in self.initial_tokens]}')
             tokens = [list(token) for token in self.initial_tokens]
-            tokens = pad_tokens(tokens)
+            print(f'token lengths for tensor conversion: {[len(t) for t in tokens]}')
+            #tokens = pad_tokens(tokens)
+            #tokens = trunc_tokens(tokens)
             tokens: Tensor = torch.tensor(tokens)
         else:
             tokens: Tensor = torch.tensor([self.initial_tokens]).repeat(n_audio, 1)

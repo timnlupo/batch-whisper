@@ -472,16 +472,19 @@ def batch_transcribe(
     with tqdm.tqdm(total=max(num_frames), unit='frames', disable=verbose is not False) as pbar:
         # NOTE: This is the meat of the decoding loop
         # NOTE: num_frames = columns of global mel spec
-        #count = 0
+        count = 0
         #rescounter = 0
         while check_cursors(seekers, num_frames):
-            #count += 1
-            #if count >= 10:
-            #    break
+            count += 1
+            if count >= 10:
+                break
             #tqdm.tqdm.write(f'seekers: {seekers}')
             #tqdm.tqdm.write(f'num_frames: {num_frames}')
             # NOTE: This tells us if some of the audio clips have finished being processed
             continue_processing = [seeker < nf for seeker,nf in list(zip(seekers, num_frames))]
+            print(seekers)
+            print(num_frames)
+            print(continue_processing)
             # Only those segments for clips that are not done being processed
             imap = [i for i,v in enumerate(continue_processing) if v]
             batch_segments = []
@@ -492,9 +495,11 @@ def batch_transcribe(
                     # NOTE: Only select the segments that remain past the current timecode from the batch
                     # NOTE: segment is a selection from the overall mel spec of the clip
                     timestamp_offset = float(seekers[i] * HOP_LENGTH / SAMPLE_RATE)
+                    tqdm.tqdm.write(f'batch {i}, seeker at {seekers[i]}, timestamp_offset {timestamp_offset}')
                     batch_timestamp_offsets.append(timestamp_offset)
                     # NOTE: N_FRAMES is 3000, the width of the mel-spec that the encoder expects
                     segment = pad_or_trim(mel[:, seekers[i]:], N_FRAMES).to(model.device).to(dtype)
+                    tqdm.tqdm.write(f'batch {i}, mels[{i}][:, {seekers[i]}:], shape {segment.shape}')
                     segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
                     batch_segments.append(segment)
                     batch_segment_durations.append(segment_duration)
@@ -503,8 +508,12 @@ def batch_transcribe(
 
             # TODO: Handle decode options for each clip individually
             # TODO: This i is out of context
+            tqdm.tqdm.write(f'prompt reset since pre inference: {prompt_reset_since}')
+            for i in range(len(batch_segments)):
+                tqdm.tqdm.write(f'batch id {i} decoded prompt: {tokenizers["en"].decode(all_tokens[imap[i]][prompt_reset_since[imap[i]]:])}')
             decode_options["prompt"] = [all_tokens[imap[i]][prompt_reset_since[imap[i]]:] for i in range(len(batch_segments))]
             results: List[DecodingResult] = decode_with_fallback(torch.stack(batch_segments)) 
+            print(results)
             #rescounter += 1
             batch_tokens = [torch.tensor(result.tokens) for result in results]
 
@@ -528,9 +537,9 @@ def batch_transcribe(
             # TODO: Investigate tokenizer.timestamp_begin
             #tqdm.tqdm.write(f'batch_tokens: {batch_tokens}')
             batch_timestamp_tokens: List[torch.Tensor] = [tokens.ge(tokenizers[languages[imap[i]]].timestamp_begin) for i,tokens in enumerate(batch_tokens)]
-            #tqdm.tqdm.write(f'batch_timestamp_tokens: {batch_timestamp_tokens}')
+            tqdm.tqdm.write(f'batch_timestamp_tokens: {batch_timestamp_tokens}')
             batch_consecutive = [torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0].add_(1) for timestamp_tokens in batch_timestamp_tokens]
-            #tqdm.tqdm.write(f'batch_consecutive: {batch_consecutive}')
+            tqdm.tqdm.write(f'batch_consecutive: {batch_consecutive}')
             for i,consecutive in enumerate(batch_consecutive):
                 if no_speech_results[i]:
                     #tqdm.tqdm.write(f'skipping, no speech results {i}')
@@ -538,6 +547,7 @@ def batch_transcribe(
                 if len(consecutive) > 0:  # if the output contains two consecutive timestamp tokens
                     last_slice = 0
                     for current_slice in consecutive:
+                        tqdm.tqdm.write(f'clip {i}, slice from {last_slice}:{current_slice}')
                         sliced_tokens = batch_tokens[i][last_slice:current_slice]
                         start_timestamp_position = (
                             sliced_tokens[0].item() - tokenizers[languages[imap[i]]].timestamp_begin
@@ -545,14 +555,18 @@ def batch_transcribe(
                         end_timestamp_position = (
                             sliced_tokens[-1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                         )
+                        tqdm.tqdm.write(f'... start timestamp pos: {start_timestamp_position}, end timestamp pos: {end_timestamp_position}')
+                        tqdm.tqdm.write(f'batch_timestamp_offset: {batch_timestamp_offsets[i]}')
+                        tqdm.tqdm.write(f'add segment start: {batch_timestamp_offsets[i] + start_timestamp_position * time_precision}')
+                        tqdm.tqdm.write(f'add segment end: {batch_timestamp_offsets[i] + end_timestamp_position * time_precision}')
                         # NOTE: This is where we append results and metadata to our list of results
                         ##tqdm.tqdm.write(f'res: {rescounter}, i: {i}, consecutive results: {results[i]}')
-                        ##tqdm.tqdm.write(f'sliced tokens: {sliced_tokens}')
+                        tqdm.tqdm.write(f'sliced tokens: {sliced_tokens}')
                         add_segment(
                             seeker=seekers[imap[i]],
                             segments=all_segments[imap[i]],
-                            start=timestamp_offset + start_timestamp_position * time_precision,
-                                end=timestamp_offset + end_timestamp_position * time_precision,
+                            start=batch_timestamp_offsets[i] + start_timestamp_position * time_precision,
+                                end=batch_timestamp_offsets[i] + end_timestamp_position * time_precision,
                                 text_tokens=sliced_tokens[1:-1],
                                 result=results[i],
                                 tokenizer=tokenizers[languages[imap[i]]]
@@ -561,10 +575,10 @@ def batch_transcribe(
                     last_timestamp_position = (
                         batch_tokens[i][last_slice - 1].item() - tokenizers[languages[imap[i]]].timestamp_begin
                     )
-                    #tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
+                    tqdm.tqdm.write(f'(consecutive) stepping seekers {imap[i]} from {seekers[imap[i]]}')
                     seekers[imap[i]] += last_timestamp_position * input_stride
                     all_tokens[imap[i]].extend(batch_tokens[i][: last_slice + 1].tolist())
-                    #tqdm.tqdm.write(f'... to {seekers[imap[i]]} by timestamp_pos {last_timestamp_position} * input_stride {input_stride} = {last_timestamp_position * input_stride}')
+                    tqdm.tqdm.write(f'... to {seekers[imap[i]]} by timestamp_pos {last_timestamp_position} * input_stride {input_stride} = {last_timestamp_position * input_stride}')
                 else:
                     duration = batch_segment_durations[i]
                     timestamps = batch_tokens[i][batch_timestamp_tokens[i].nonzero().flatten()]
@@ -579,21 +593,21 @@ def batch_transcribe(
                     add_segment(
                         seeker=seekers[imap[i]],
                         segments=all_segments[imap[i]],
-                        start=timestamp_offset,
-                        end=timestamp_offset + duration,
+                        start=batch_timestamp_offsets[i],
+                        end=batch_timestamp_offsets[i] + duration,
                         text_tokens=batch_tokens[i],
                         result=results[i],
                         tokenizer=tokenizers[languages[imap[i]]]
                     )
 
-                    #tqdm.tqdm.write(f'stepping seekers {imap[i]} from {seekers[imap[i]]}')
+                    tqdm.tqdm.write(f'(non-consecutive) stepping seekers {imap[i]} from {seekers[imap[i]]}')
                     seekers[imap[i]] += segments[imap[i]].shape[-1]
                     all_tokens[imap[i]].extend(batch_tokens[i].tolist())
-                    #tqdm.tqdm.write(f'... to {seekers[imap[i]]} by segment shape {segments[imap[i]].shape[-1]}'
+                    tqdm.tqdm.write(f'... to {seekers[imap[i]]} by segment shape {segments[imap[i]].shape[-1]}')
 
-                if not condition_on_previous_text or result.temperature > 0.5:
+                if not condition_on_previous_text or results[i].temperature > 0.5:
                     # do not feed the prompt tokens if a high temperature was used
-                    prompt_reset_since[i] = len(all_tokens[i])
+                    prompt_reset_since[imap[i]] = len(all_tokens[imap[i]])
 
             # update progress bar
             midx = num_frames.index(max(num_frames))
