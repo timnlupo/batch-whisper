@@ -549,11 +549,11 @@ class DecodingTask:
         return options
 
     def _get_initial_tokens(self) -> Tuple[int]:
-        # TODO: branch to _get_batched_initial_tokens if necessary
         tokens = list(self.sot_sequence)
         prefix = self.options.prefix
         prompt = self.options.prompt
         if (len(prompt) >= 1) and (type(prompt[0]) == list):
+            # branch to batched version if prompt is a list of prompts
             return self._get_batched_initial_tokens()
 
         if prefix:
@@ -574,7 +574,6 @@ class DecodingTask:
         return tuple(tokens)
 
     def _get_batched_initial_tokens(self) -> List[Tuple[int]]:
-        # NOTE: sot_sequence has tokens specifying language, etc. to bias model results
         tokens = list(self.sot_sequence)
         prefixes = self.options.prefix
         if type(prefixes) != list:
@@ -583,9 +582,7 @@ class DecodingTask:
         min_prompt_len = min([len(prompt) for prompt in prompts])
 
         res_tokens = [tokens]*len(prompts)
-        #print(f'initial res_tokens: {res_tokens}')
         for i,(prefix,prompt) in enumerate(list(zip(prefixes, prompts))):
-            #print(f'i: {i}, prefix: {prefix}, prompt: {prompt}')
             if prefix:
                 prefix_tokens = (
                     self.tokenizer.encode(" " + prefix.strip()) if isinstance(prefix, str) else prefix
@@ -599,9 +596,9 @@ class DecodingTask:
                 prompt_tokens = (
                     self.tokenizer.encode(" " + prompt.strip()) if isinstance(prompt, str) else prompt
                 )
+                # truncate longer prompts to the length of the shortest prompt
                 prompt_tokens = prompt_tokens[-min_prompt_len:]
                 res_tokens[i] = [self.tokenizer.sot_prev] + prompt_tokens[-(self.n_ctx // 2 - 1) :] + res_tokens[i]
-        #print(f'final res_tokens: {res_tokens}') 
         return [tuple(tokens) for tokens in res_tokens]
 
     def _get_suppress_tokens(self) -> Tuple[int]:
@@ -704,38 +701,10 @@ class DecodingTask:
         tokenizer: Tokenizer = self.tokenizer
         n_audio: int = mel.shape[0]
 
-        def pad_tokens(batch_tokens: List[List[int]]) -> List[List[int]]:
-            # pad all token sequences to the length of the largest sequence with nospeech tokens
-            #print(f'batch tokens to pad: {batch_tokens}')
-            target_len = max([len(l) for l in batch_tokens])
-            new_batch_tokens = []
-            for entry in batch_tokens:
-                disparity = target_len - len(entry)
-                prefix = [50256]*disparity
-                new_batch_tokens.append(prefix + entry)
-            print(f'new batched tokens after padding: {new_batch_tokens}')
-            print(f'decoded final tokens: {[tokenizer.decode(tokens) for tokens in new_batch_tokens]}')
-            return new_batch_tokens
-        
-        def trunc_tokens(batch_tokens: List[List[int]]) -> List[List[int]]:
-            # truncate all token sequences to the length of the shortest sequence
-            target_len = min([len(l) for l in batch_tokens])
-            new_batch_tokens = []
-            for entry in batch_tokens:
-                pref = entry.pop(0)
-                disparity = len(entry) - target_len + 1
-                new_batch_tokens.append([pref] + entry[disparity:])
-            return new_batch_tokens
-
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
-        # TODO: get prompt tokens in self.initial_tokens, pad, and batch along zero dimension
         if type(self.initial_tokens) == list:
-            print(f'initial_tokens: {self.initial_tokens}')
-            print(f'decoded initial tokens: {[tokenizer.decode(tokens) for tokens in self.initial_tokens]}')
+            # if batched, then stack prompts together in batch dimension
             tokens = [list(token) for token in self.initial_tokens]
-            print(f'token lengths for tensor conversion: {[len(t) for t in tokens]}')
-            #tokens = pad_tokens(tokens)
-            #tokens = trunc_tokens(tokens)
             tokens: Tensor = torch.tensor(tokens)
         else:
             tokens: Tensor = torch.tensor([self.initial_tokens]).repeat(n_audio, 1)
@@ -753,7 +722,6 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
-        # NOTE: This is where the model is called
         tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens)
 
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
