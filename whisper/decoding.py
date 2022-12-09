@@ -700,8 +700,9 @@ class DecodingTask:
         self.decoder.reset()
         tokenizer: Tokenizer = self.tokenizer
         n_audio: int = mel.shape[0]
-
+        
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
+
         if type(self.initial_tokens) == list:
             # if batched, then stack prompts together in batch dimension
             tokens = [list(token) for token in self.initial_tokens]
@@ -711,12 +712,12 @@ class DecodingTask:
 
         # detect language if requested, overwriting the language token
         languages, language_probs = self._detect_language(audio_features, tokens)
+
         if self.options.task == "lang_id":
             return [
                 DecodingResult(audio_features=features, language=language, language_probs=probs)
                 for features, language, probs in zip(audio_features, languages, language_probs)
             ]
-
         # repeat the audio & text tensors by the group size, for beam search or best-of-n sampling
         audio_features = audio_features.repeat_interleave(self.n_group, dim=0)
         tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)

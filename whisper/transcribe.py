@@ -1,3 +1,4 @@
+import time
 import argparse
 import os
 import warnings
@@ -279,15 +280,15 @@ def batch_transcribe(
     **decode_options,
 ):
     """
-    Transcribe an audio file using Whisper
+    Transcribe multiple audio files in parallel using the batch dimension of the Whisper model
 
     Parameters
     ----------
     model: Whisper
         The Whisper model instance
 
-    audio: Union[str, np.ndarray, torch.Tensor]
-        The path to the audio file to open, or the audio waveform
+    audio: Union[List[str], List[np.ndarray], List[torch.Tensor]]
+        The list of paths to the audio files to open, or the audio waveforms
 
     verbose: bool
         Whether to display the text being decoded to the console. If True, displays all the details,
@@ -317,7 +318,7 @@ def batch_transcribe(
 
     Returns
     -------
-    A dictionary containing the resulting text ("text") and segment-level details ("segments"), and
+    A list of dictionaries containing the resulting text ("text") and segment-level details ("segments"), and
     the spoken language ("language"), which is detected when `decode_options["language"]` is None.
     """
     batch_size = len(audio)
