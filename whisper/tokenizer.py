@@ -235,6 +235,7 @@ class Tokenizer:
     @property
     @lru_cache()
     def non_speech_tokens(self) -> Tuple[int]:
+        # NOTE: This is a way to suppress artifacts of the training data like captions etc.
         """
         Returns the list of tokens to suppress in order to avoid any speaker tags or non-speech
         annotations, to prevent sampling texts that are not actually spoken in the audio, e.g.

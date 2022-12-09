@@ -105,7 +105,15 @@ result = model.transcribe("audio.mp3")
 print(result["text"])
 ```
 
-Internally, the `transcribe()` method reads the entire file and processes the audio with a sliding 30-second window, performing autoregressive sequence-to-sequence predictions on each window.
+Internally, the `transcribe()` method reads the entire file and processes the audio with a sliding 30-second window, performing autoregressive sequence-to-sequence predictions on each window. The `transcribe()` method also supports lists of files, which will be processed in-parallel as a batch and a list of results will be returned. This can be more efficient than processing many clips serially on a GPU.
+
+```python
+results = model.transcribe(["audio1.mp3", "audio2.mp3"])
+print(results[0]['text'])
+print(results[1]['text'])
+```
+
+In the case where audio clips are different lengths, whisper will dynamically reduce its internal batch size as shorter clips are completed.
 
 Below is an example usage of `whisper.detect_language()` and `whisper.decode()` which provide lower-level access to the model.
 

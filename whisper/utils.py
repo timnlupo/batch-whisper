@@ -26,7 +26,7 @@ def optional_float(string):
 def compression_ratio(text) -> float:
     text_bytes = text.encode("utf-8")
     return len(text_bytes) / len(zlib.compress(text_bytes))
-
+  
 
 def format_timestamp(seconds: float, always_include_hours: bool = False, decimal_marker: str = '.'):
     assert seconds >= 0, "non-negative timestamp expected"
