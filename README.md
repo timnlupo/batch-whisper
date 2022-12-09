@@ -109,6 +109,8 @@ Internally, the `transcribe()` method reads the entire file and processes the au
 
 ```python
 results = model.transcribe(["audio1.mp3", "audio2.mp3"])
+print(results[0]['text'])
+print(results[1]['text'])
 ```
 
 In the case where audio clips are different lengths, whisper will dynamically reduce its internal batch size as shorter clips are completed.
