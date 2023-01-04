@@ -72,7 +72,7 @@ def detect_language(model: "Whisper", mel: Tensor, tokenizer: Tokenizer = None) 
 class DecodingOptions:
     task: str = "transcribe"  # whether to perform X->X "transcribe" or X->English "translate"
     # TODO: Language could vary between samples of a batch
-    language: Optional[Union[str, list[str]]] = None  # language that the audio is in; uses detected language if None
+    language: Optional[Union[str, List[str]]] = None  # language that the audio is in; uses detected language if None
 
     # sampling-related options
     # NOTE: These can be held constant across a batch
