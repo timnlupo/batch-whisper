@@ -28,7 +28,7 @@ def transcribe(
     no_speech_threshold: Optional[float] = 0.6,
     condition_on_previous_text: bool = True,
     **decode_options,
-):
+): 
     """
     Transcribe an audio file using Whisper
 
@@ -333,19 +333,28 @@ def batch_transcribe(
         decode_options["fp16"] = False
 
     mels = [log_mel_spectrogram(audio_file) for audio_file in audio]
+    segments = [pad_or_trim(mel, N_FRAMES).to(model.device).to(dtype) for mel in mels]
 
-    languages = []
     if decode_options.get("language", None) is None:
         if not model.is_multilingual:
-            languages = ['en']
+            languages = ['en']*len(audio)
         else:
             if verbose:
                 print("Detecting language using up to the first 30 seconds. Use `--language` to specify the language")
-            segments = [pad_or_trim(mel, N_FRAMES).to(model.device).to(dtype) for mel in mels]
             language_probs = [model.detect_language(segment)[1] for segment in segments]
             languages = [max(probs, key=probs.get) for probs in language_probs]
             if verbose is not None:
                 print(f"Detected languages: {[LANGUAGES[opt].title() for opt in languages]}")
+    else:
+        lang = decode_options.get("language")
+        if type(lang) == str:
+            languages = [lang]*len(audio)
+        elif type(lang) == list:
+            assert all(isinstance(l, str) for l in lang), "If a list of languages is specified in DecodeOptions, all languages must be strings." 
+            assert len(lang) == len(audio), "If a list of languages is specified in DecodeOptions, the list length must match the number of audio files specified."
+            languages = lang 
+        else:
+            raise NotImplementedError("Only string and list arguments are supported for the language DecodeOption.")
 
     task = decode_options.get("task", "transcribe")
     tokenizers = {}
@@ -458,6 +467,7 @@ def batch_transcribe(
                     continue
 
             decode_options["prompt"] = [all_tokens[imap[i]][prompt_reset_since[imap[i]]:] for i in range(len(batch_segments))]
+            decode_options["language"] = [l for i,l in enumerate(languages) if continue_processing[i]]
             results: List[DecodingResult] = decode_with_fallback(torch.stack(batch_segments)) 
             batch_tokens = [torch.tensor(result.tokens) for result in results]
 
