@@ -739,7 +739,7 @@ class DecodingTask:
     def run(self, mel: Tensor) -> List[DecodingResult]:
         if type(self.decoder) == list:
             _ = [decoder.reset() for decoder in self.decoder]
-            tokenizer: Tokenizer = self.tokenizers
+            tokenizer: List[Tokenizer] = self.tokenizers
         else:
             self.decoder.reset()
             tokenizer: Tokenizer = self.tokenizer
@@ -805,7 +805,10 @@ class DecodingTask:
         # select the top-ranked sample in each group
         selected = self.sequence_ranker.rank(tokens, sum_logprobs)
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
-        texts: List[str] = [tokenizer[i].decode(t).strip() for i,t in enumerate(tokens)]
+        if type(tokenizer) == list:
+            texts: List[str] = [tokenizer[i].decode(t).strip() for i,t in enumerate(tokens)]
+        else:
+            texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
