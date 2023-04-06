@@ -1,4 +1,4 @@
-from whisper.tokenizer import get_tokenizer
+from batchwhisper.tokenizer import get_tokenizer
 
 
 def test_tokenizer():
